@@ -1,11 +1,12 @@
 import type { Response } from 'cross-fetch';
 import { fetch } from 'cross-fetch';
-import { BasicRepresentation } from '../ldp/representation/BasicRepresentation';
-import type { Representation } from '../ldp/representation/Representation';
+import { BasicRepresentation } from '../http/representation/BasicRepresentation';
+import type { Representation } from '../http/representation/Representation';
 import { getLoggerFor } from '../logging/LogUtil';
 import type { RepresentationConverter } from '../storage/conversion/RepresentationConverter';
 import { INTERNAL_QUADS } from './ContentTypes';
 import { BadRequestHttpError } from './errors/BadRequestHttpError';
+import { parseContentType } from './HeaderUtil';
 
 const logger = getLoggerFor('FetchUtil');
 
@@ -46,9 +47,10 @@ Promise<Representation> {
     logger.warn(`Missing content-type header from ${response.url}`);
     throw error;
   }
+  const contentTypeValue = parseContentType(contentType).type;
 
   // Try to convert to quads
-  const representation = new BasicRepresentation(body, contentType);
+  const representation = new BasicRepresentation(body, contentTypeValue);
   const preferences = { type: { [INTERNAL_QUADS]: 1 }};
   return converter.handleSafe({ representation, identifier: { path: response.url }, preferences });
 }

@@ -2,9 +2,9 @@ import type { Stats } from 'fs';
 import { createWriteStream, createReadStream, promises as fsPromises } from 'fs';
 import type { Readable } from 'stream';
 import type { Quad } from 'rdf-js';
-import type { Representation } from '../../ldp/representation/Representation';
-import { RepresentationMetadata } from '../../ldp/representation/RepresentationMetadata';
-import type { ResourceIdentifier } from '../../ldp/representation/ResourceIdentifier';
+import type { Representation } from '../../http/representation/Representation';
+import { RepresentationMetadata } from '../../http/representation/RepresentationMetadata';
+import type { ResourceIdentifier } from '../../http/representation/ResourceIdentifier';
 import { NotFoundHttpError } from '../../util/errors/NotFoundHttpError';
 import { isSystemError } from '../../util/errors/SystemError';
 import { UnsupportedMediaTypeHttpError } from '../../util/errors/UnsupportedMediaTypeHttpError';
@@ -12,7 +12,7 @@ import { guardStream } from '../../util/GuardedStream';
 import type { Guarded } from '../../util/GuardedStream';
 import { joinFilePath, isContainerIdentifier } from '../../util/PathUtil';
 import { parseQuads, serializeQuads } from '../../util/QuadUtil';
-import { addResourceMetadata } from '../../util/ResourceUtil';
+import { addResourceMetadata, updateModifiedDate } from '../../util/ResourceUtil';
 import { toLiteral } from '../../util/TermUtil';
 import { CONTENT_TYPE, DC, LDP, POSIX, RDF, SOLID_META, XSD } from '../../util/Vocabularies';
 import type { FileIdentifierMapper, ResourceLink } from '../mapping/FileIdentifierMapper';
@@ -142,7 +142,8 @@ export class FileDataAccessor implements DataAccessor {
   }
 
   /**
-   * Gets the Stats object corresponding to the given file path.
+   * Gets the Stats object corresponding to the given file path,
+   * resolving symbolic links.
    * @param path - File path to get info from.
    *
    * @throws NotFoundHttpError
@@ -150,7 +151,7 @@ export class FileDataAccessor implements DataAccessor {
    */
   private async getStats(path: string): Promise<Stats> {
     try {
-      return await fsPromises.lstat(path);
+      return await fsPromises.stat(path);
     } catch (error: unknown) {
       if (isSystemError(error) && error.code === 'ENOENT') {
         throw new NotFoundHttpError('', { cause: error });
@@ -193,9 +194,10 @@ export class FileDataAccessor implements DataAccessor {
    */
   private async writeMetadata(link: ResourceLink, metadata: RepresentationMetadata): Promise<boolean> {
     // These are stored by file system conventions
-    metadata.remove(RDF.type, LDP.terms.Resource);
-    metadata.remove(RDF.type, LDP.terms.Container);
-    metadata.remove(RDF.type, LDP.terms.BasicContainer);
+    metadata.remove(RDF.terms.type, LDP.terms.Resource);
+    metadata.remove(RDF.terms.type, LDP.terms.Container);
+    metadata.remove(RDF.terms.type, LDP.terms.BasicContainer);
+    metadata.removeAll(DC.terms.modified);
     metadata.removeAll(CONTENT_TYPE);
     const quads = metadata.quads();
     const metadataLink = await this.resourceMapper.mapUrlToFilePath(link.identifier, true);
@@ -272,16 +274,23 @@ export class FileDataAccessor implements DataAccessor {
 
     // For every child in the container we want to generate specific metadata
     for await (const entry of dir) {
-      const childName = entry.name;
+      // Obtain details of the entry, resolving any symbolic links
+      const childPath = joinFilePath(link.filePath, entry.name);
+      let childStats;
+      try {
+        childStats = await this.getStats(childPath);
+      } catch {
+        // Skip this entry if details could not be retrieved (e.g., bad symbolic link)
+        continue;
+      }
 
       // Ignore non-file/directory entries in the folder
-      if (!entry.isFile() && !entry.isDirectory()) {
+      if (!childStats.isFile() && !childStats.isDirectory()) {
         continue;
       }
 
       // Generate the URI corresponding to the child resource
-      const childLink = await this.resourceMapper
-        .mapFilePathToUrl(joinFilePath(link.filePath, childName), entry.isDirectory());
+      const childLink = await this.resourceMapper.mapFilePathToUrl(childPath, childStats.isDirectory());
 
       // Hide metadata files
       if (childLink.isMetadata) {
@@ -289,7 +298,6 @@ export class FileDataAccessor implements DataAccessor {
       }
 
       // Generate metadata of this specific child
-      const childStats = await fsPromises.lstat(joinFilePath(link.filePath, childName));
       const metadata = new RepresentationMetadata(childLink.identifier);
       addResourceMetadata(metadata, childStats.isDirectory());
       this.addPosixMetadata(metadata, childStats);
@@ -303,9 +311,7 @@ export class FileDataAccessor implements DataAccessor {
    * @param stats - Stats of the file/directory corresponding to the resource.
    */
   private addPosixMetadata(metadata: RepresentationMetadata, stats: Stats): void {
-    metadata.add(DC.terms.modified,
-      toLiteral(stats.mtime.toISOString(), XSD.terms.dateTime),
-      SOLID_META.terms.ResponseMetadata);
+    updateModifiedDate(metadata, stats.mtime);
     metadata.add(POSIX.terms.mtime,
       toLiteral(Math.floor(stats.mtime.getTime() / 1000), XSD.terms.integer),
       SOLID_META.terms.ResponseMetadata);

@@ -1,5 +1,5 @@
 {
-  "@context": "https://linkedsoftwaredependencies.org/bundles/npm/@solid/community-server/^1.0.0/components/context.jsonld",
+  "@context": "https://linkedsoftwaredependencies.org/bundles/npm/@solid/community-server/^2.0.0/components/context.jsonld",
   "@graph": [
     {
       "comment": "Contains all features of acl auxiliary resources (suffix, link header, etc.).",
@@ -15,7 +15,8 @@
         "@type": "RdfValidator",
         "converter": { "@id": "urn:solid-server:default:RepresentationConverter" }
       },
-      "isRootRequired": true
+      "ownAuthorization": true,
+      "requiredInRoot": true
     },
     {
       "@id": "urn:solid-server:default:AclIdentifierStrategy",

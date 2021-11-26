@@ -1,8 +1,8 @@
 import 'jest-rdf';
 import type { Readable } from 'stream';
 import { namedNode } from '@rdfjs/data-model';
-import type { Representation } from '../../../../src/ldp/representation/Representation';
-import { RepresentationMetadata } from '../../../../src/ldp/representation/RepresentationMetadata';
+import type { Representation } from '../../../../src/http/representation/Representation';
+import { RepresentationMetadata } from '../../../../src/http/representation/RepresentationMetadata';
 import { FileDataAccessor } from '../../../../src/storage/accessors/FileDataAccessor';
 import { ExtensionBasedMapper } from '../../../../src/storage/mapping/ExtensionBasedMapper';
 import { APPLICATION_OCTET_STREAM } from '../../../../src/util/ContentTypes';
@@ -21,6 +21,8 @@ jest.mock('fs');
 
 const rootFilePath = 'uploads';
 const now = new Date();
+// All relevant functions do not care about the milliseconds or remove them
+now.setMilliseconds(0);
 
 describe('A FileDataAccessor', (): void => {
   const base = 'http://test.com/';
@@ -103,7 +105,8 @@ describe('A FileDataAccessor', (): void => {
       expect(metadata.get(POSIX.size)).toEqualRdfTerm(toLiteral('data'.length, XSD.terms.integer));
       expect(metadata.get(DC.modified)).toEqualRdfTerm(toLiteral(now.toISOString(), XSD.terms.dateTime));
       expect(metadata.get(POSIX.mtime)).toEqualRdfTerm(toLiteral(Math.floor(now.getTime() / 1000), XSD.terms.integer));
-      expect(metadata.quads(null, null, null, SOLID_META.terms.ResponseMetadata)).toHaveLength(3);
+      // `dc:modified` is in the default graph
+      expect(metadata.quads(null, null, null, SOLID_META.terms.ResponseMetadata)).toHaveLength(2);
     });
 
     it('does not generate size metadata for a container.', async(): Promise<void> => {
@@ -114,7 +117,14 @@ describe('A FileDataAccessor', (): void => {
     });
 
     it('generates the metadata for a container.', async(): Promise<void> => {
-      cache.data = { container: { resource: 'data', 'resource.meta': 'metadata', notAFile: 5, container2: {}}};
+      cache.data = {
+        container: {
+          resource: 'data',
+          'resource.meta': 'metadata',
+          notAFile: 5,
+          container2: {},
+        },
+      };
       metadata = await accessor.getMetadata({ path: `${base}container/` });
       expect(metadata.identifier.value).toBe(`${base}container/`);
       expect(metadata.getAll(RDF.type)).toEqualRdfTermArray(
@@ -123,24 +133,61 @@ describe('A FileDataAccessor', (): void => {
       expect(metadata.get(POSIX.size)).toBeUndefined();
       expect(metadata.get(DC.modified)).toEqualRdfTerm(toLiteral(now.toISOString(), XSD.terms.dateTime));
       expect(metadata.get(POSIX.mtime)).toEqualRdfTerm(toLiteral(Math.floor(now.getTime() / 1000), XSD.terms.integer));
-      expect(metadata.quads(null, null, null, SOLID_META.terms.ResponseMetadata)).toHaveLength(2);
+      // `dc:modified` is in the default graph
+      expect(metadata.quads(null, null, null, SOLID_META.terms.ResponseMetadata)).toHaveLength(1);
     });
 
     it('generates metadata for container child resources.', async(): Promise<void> => {
-      cache.data = { container: { resource: 'data', 'resource.meta': 'metadata', notAFile: 5, container2: {}}};
+      cache.data = {
+        container: {
+          resource: 'data',
+          'resource.meta': 'metadata',
+          symlink: Symbol(`${rootFilePath}/container/resource`),
+          symlinkContainer: Symbol(`${rootFilePath}/container/container2`),
+          symlinkInvalid: Symbol(`${rootFilePath}/invalid`),
+          notAFile: 5,
+          container2: {},
+        },
+      };
+
       const children = [];
       for await (const child of accessor.getChildren({ path: `${base}container/` })) {
         children.push(child);
       }
-      expect(children).toHaveLength(2);
+
+      // Identifiers
+      expect(children).toHaveLength(4);
+      expect(new Set(children.map((child): string => child.identifier.value))).toEqual(new Set([
+        `${base}container/container2/`,
+        `${base}container/resource`,
+        `${base}container/symlink`,
+        `${base}container/symlinkContainer/`,
+      ]));
+
+      // Containers
+      for (const child of children.filter(({ identifier }): boolean => identifier.value.endsWith('/'))) {
+        const types = child.getAll(RDF.type).map((term): string => term.value);
+        expect(types).toContain(LDP.Resource);
+        expect(types).toContain(LDP.Container);
+        expect(types).toContain(LDP.BasicContainer);
+      }
+
+      // Documents
+      for (const child of children.filter(({ identifier }): boolean => !identifier.value.endsWith('/'))) {
+        const types = child.getAll(RDF.type).map((term): string => term.value);
+        expect(types).toContain(LDP.Resource);
+        expect(types).not.toContain(LDP.Container);
+        expect(types).not.toContain(LDP.BasicContainer);
+      }
+
+      // All resources
       for (const child of children) {
-        expect([ `${base}container/resource`, `${base}container/container2/` ]).toContain(child.identifier.value);
-        expect(child.getAll(RDF.type)!.some((type): boolean => type.equals(LDP.terms.Resource))).toBe(true);
         expect(child.get(DC.modified)).toEqualRdfTerm(toLiteral(now.toISOString(), XSD.terms.dateTime));
         expect(child.get(POSIX.mtime)).toEqualRdfTerm(toLiteral(Math.floor(now.getTime() / 1000),
           XSD.terms.integer));
+        // `dc:modified` is in the default graph
         expect(child.quads(null, null, null, SOLID_META.terms.ResponseMetadata))
-          .toHaveLength(isContainerPath(child.identifier.value) ? 2 : 3);
+          .toHaveLength(isContainerPath(child.identifier.value) ? 1 : 2);
       }
     });
 

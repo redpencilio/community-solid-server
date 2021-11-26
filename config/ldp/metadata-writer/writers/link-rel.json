@@ -1,5 +1,5 @@
 {
-  "@context": "https://linkedsoftwaredependencies.org/bundles/npm/@solid/community-server/^1.0.0/components/context.jsonld",
+  "@context": "https://linkedsoftwaredependencies.org/bundles/npm/@solid/community-server/^2.0.0/components/context.jsonld",
   "@graph": [
     {
       "comment": "Converts all triples with the given predicates to Link headers.",
@@ -13,6 +13,10 @@
         {
           "LinkRelMetadataWriter:_linkRelMap_key": "http://www.w3.org/ns/auth/acl#accessControl",
           "LinkRelMetadataWriter:_linkRelMap_value": "acl"
+        },
+        {
+          "LinkRelMetadataWriter:_linkRelMap_key": "http://www.w3.org/ns/ldp#inbox",
+          "LinkRelMetadataWriter:_linkRelMap_value": "http://www.w3.org/ns/ldp#inbox"
         }
       ]
     }
