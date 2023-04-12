@@ -91,7 +91,7 @@ describe.each(stores)('A server supporting conditions with %s', (name, { storeCo
     expect(response.status).toBe(412);
 
     // PUT
-    await patchResource(documentUrl, query);
+    await patchResource(documentUrl, query, 'sparql');
 
     // PUT with header now succeeds
     const query2 = 'INSERT {<http://test.com/s2> <http://test.com/p2> <http://test.com/o2>} WHERE {}';
@@ -168,6 +168,27 @@ describe.each(stores)('A server supporting conditions with %s', (name, { storeCo
 
     // DELETE
     expect(await deleteResource(documentUrl!)).toBeUndefined();
+  });
+
+  it('throws 304 error if "if-none-match" header matches and request type is GET or HEAD.', async(): Promise<void> => {
+    // GET root ETag
+    let response = await getResource(baseUrl);
+    const eTag = response.headers.get('ETag');
+    expect(typeof eTag).toBe('string');
+
+    // GET fails because of header
+    response = await fetch(baseUrl, {
+      method: 'GET',
+      headers: { 'if-none-match': eTag! },
+    });
+    expect(response.status).toBe(304);
+
+    // HEAD fails because of header
+    response = await fetch(baseUrl, {
+      method: 'HEAD',
+      headers: { 'if-none-match': eTag! },
+    });
+    expect(response.status).toBe(304);
   });
 
   it('prevents operations if the "if-unmodified-since" header is before the modified date.', async(): Promise<void> => {

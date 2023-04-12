@@ -1,5 +1,5 @@
 /* eslint-disable function-paren-newline */
-import { namedNode } from '@rdfjs/data-model';
+import { DataFactory } from 'n3';
 import type { NamedNode } from 'rdf-js';
 
 type RecordOf<TKey extends any[], TValue> = Record<TKey[number], TValue>;
@@ -41,7 +41,7 @@ Namespace<typeof localNames, string> {
  */
 export function createTermNamespace<T extends string>(baseUri: string, ...localNames: T[]):
 Namespace<typeof localNames, NamedNode> {
-  return createNamespace(baseUri, namedNode, ...localNames);
+  return createNamespace(baseUri, DataFactory.namedNode, ...localNames);
 }
 
 /**
@@ -71,6 +71,12 @@ export const ACL = createUriAndTermNamespace('http://www.w3.org/ns/auth/acl#',
   'Control',
 );
 
+export const AS = createUriAndTermNamespace('https://www.w3.org/ns/activitystreams#',
+  'Create',
+  'Delete',
+  'Update',
+);
+
 export const AUTH = createUriAndTermNamespace('urn:solid:auth:',
   'userMode',
   'publicMode',
@@ -86,8 +92,18 @@ export const FOAF = createUriAndTermNamespace('http://xmlns.com/foaf/0.1/',
   'Agent',
 );
 
+export const HH = createUriAndTermNamespace('http://www.w3.org/2011/http-headers#',
+  'content-length',
+);
+
 export const HTTP = createUriAndTermNamespace('http://www.w3.org/2011/http#',
   'statusCodeNumber',
+);
+
+export const IANA = createUriAndTermNamespace('http://www.w3.org/ns/iana/media-types/');
+
+export const JSON_LD = createUriAndTermNamespace('http://www.w3.org/ns/json-ld#',
+  'context',
 );
 
 export const LDP = createUriAndTermNamespace('http://www.w3.org/ns/ldp#',
@@ -119,13 +135,28 @@ export const RDF = createUriAndTermNamespace('http://www.w3.org/1999/02/22-rdf-s
   'type',
 );
 
+export const RDFS = createUriAndTermNamespace('http://www.w3.org/2000/01/rdf-schema#',
+  'label',
+);
+
 export const SOLID = createUriAndTermNamespace('http://www.w3.org/ns/solid/terms#',
+  'deletes',
+  'inserts',
   'oidcIssuer',
   'oidcIssuerRegistrationToken',
   'oidcRegistration',
+  'where',
+
+  'InsertDeletePatch',
+);
+
+export const SOLID_AS = createUriAndTermNamespace('http://www.w3.org/ns/solid/activitystreams#',
+  'Activity',
 );
 
 export const SOLID_ERROR = createUriAndTermNamespace('urn:npm:solid:community-server:error:',
+  'disallowedMethod',
+  'errorResponse',
   'stack',
 );
 
@@ -139,6 +170,11 @@ export const SOLID_META = createUriAndTermNamespace('urn:npm:solid:community-ser
   'ResponseMetadata',
   // This is used to identify templates that can be used for the representation of a resource
   'template',
+  // This is used to store Content-Type Parameters
+  'contentTypeParameter',
+  'value',
+  // This is used to indicate whether metadata should be preserved or not during a PUT operation
+  'preserve',
 );
 
 export const VANN = createUriAndTermNamespace('http://purl.org/vocab/vann/',
@@ -155,6 +191,8 @@ export const XSD = createUriAndTermNamespace('http://www.w3.org/2001/XMLSchema#'
 );
 
 // Alias for commonly used types
+export const CONTENT_LENGTH = HH['content-length'];
+export const CONTENT_LENGTH_TERM = HH.terms['content-length'];
 export const CONTENT_TYPE = MA.format;
 export const CONTENT_TYPE_TERM = MA.terms.format;
 export const PREFERRED_PREFIX = VANN.preferredNamespacePrefix;

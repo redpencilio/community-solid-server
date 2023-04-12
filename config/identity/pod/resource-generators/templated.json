@@ -1,5 +1,5 @@
 {
-  "@context": "https://linkedsoftwaredependencies.org/bundles/npm/@solid/community-server/^2.0.0/components/context.jsonld",
+  "@context": "https://linkedsoftwaredependencies.org/bundles/npm/@solid/community-server/^5.0.0/components/context.jsonld",
   "@graph": [
     {
       "comment": "Generates resources based on the templates stored in the template folder.",
@@ -10,8 +10,11 @@
         "@type": "ExtensionBasedMapperFactory"
       },
       "templateEngine": {
-        "@type": "HandlebarsTemplateEngine"
-      }
+        "@type": "HandlebarsTemplateEngine",
+        "baseUrl": { "@id": "urn:solid-server:default:variable:baseUrl" }
+      },
+      "metadataStrategy": { "@id": "urn:solid-server:default:MetadataStrategy" },
+      "store": { "@id": "urn:solid-server:default:ResourceStore"}
     }
   ]
 }

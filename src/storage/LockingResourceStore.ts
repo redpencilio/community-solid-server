@@ -10,7 +10,7 @@ import type { ExpiringReadWriteLocker } from '../util/locking/ExpiringReadWriteL
 import { endOfStream } from '../util/StreamUtil';
 import type { AtomicResourceStore } from './AtomicResourceStore';
 import type { Conditions } from './Conditions';
-import type { ResourceStore } from './ResourceStore';
+import type { ResourceStore, ChangeMap } from './ResourceStore';
 
 /**
  * Store that for every call acquires a lock before executing it on the requested resource,
@@ -34,9 +34,9 @@ export class LockingResourceStore implements AtomicResourceStore {
     this.auxiliaryStrategy = auxiliaryStrategy;
   }
 
-  public async resourceExists(identifier: ResourceIdentifier, conditions?: Conditions): Promise<boolean> {
+  public async hasResource(identifier: ResourceIdentifier): Promise<boolean> {
     return this.locks.withReadLock(this.getLockIdentifier(identifier),
-      async(): Promise<boolean> => this.source.resourceExists(identifier, conditions));
+      async(): Promise<boolean> => this.source.hasResource(identifier));
   }
 
   public async getRepresentation(identifier: ResourceIdentifier, preferences: RepresentationPreferences,
@@ -46,27 +46,27 @@ export class LockingResourceStore implements AtomicResourceStore {
   }
 
   public async addResource(container: ResourceIdentifier, representation: Representation,
-    conditions?: Conditions): Promise<ResourceIdentifier> {
+    conditions?: Conditions): Promise<ChangeMap> {
     return this.locks.withWriteLock(this.getLockIdentifier(container),
-      async(): Promise<ResourceIdentifier> => this.source.addResource(container, representation, conditions));
+      async(): Promise<ChangeMap> => this.source.addResource(container, representation, conditions));
   }
 
   public async setRepresentation(identifier: ResourceIdentifier, representation: Representation,
-    conditions?: Conditions): Promise<ResourceIdentifier[]> {
+    conditions?: Conditions): Promise<ChangeMap> {
     return this.locks.withWriteLock(this.getLockIdentifier(identifier),
-      async(): Promise<ResourceIdentifier[]> => this.source.setRepresentation(identifier, representation, conditions));
+      async(): Promise<ChangeMap> => this.source.setRepresentation(identifier, representation, conditions));
   }
 
   public async deleteResource(identifier: ResourceIdentifier,
-    conditions?: Conditions): Promise<ResourceIdentifier[]> {
+    conditions?: Conditions): Promise<ChangeMap> {
     return this.locks.withWriteLock(this.getLockIdentifier(identifier),
-      async(): Promise<ResourceIdentifier[]> => this.source.deleteResource(identifier, conditions));
+      async(): Promise<ChangeMap> => this.source.deleteResource(identifier, conditions));
   }
 
   public async modifyResource(identifier: ResourceIdentifier, patch: Patch,
-    conditions?: Conditions): Promise<ResourceIdentifier[]> {
+    conditions?: Conditions): Promise<ChangeMap> {
     return this.locks.withWriteLock(this.getLockIdentifier(identifier),
-      async(): Promise<ResourceIdentifier[]> => this.source.modifyResource(identifier, patch, conditions));
+      async(): Promise<ChangeMap> => this.source.modifyResource(identifier, patch, conditions));
   }
 
   /**
@@ -96,7 +96,7 @@ export class LockingResourceStore implements AtomicResourceStore {
     // Note that we can't just return the result of `withReadLock` since that promise only
     // resolves when the stream is finished, while we want `lockedRepresentationRun` to resolve
     // once we have the Representation.
-    // See https://github.com/solid/community-server/pull/536#discussion_r562467957
+    // See https://github.com/CommunitySolidServer/CommunitySolidServer/pull/536#discussion_r562467957
     return new Promise((resolve, reject): void => {
       let representation: Representation;
       // Make the resource time out to ensure that the lock is always released eventually.

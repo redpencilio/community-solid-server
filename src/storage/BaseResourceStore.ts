@@ -4,14 +4,14 @@ import type { RepresentationPreferences } from '../http/representation/Represent
 import type { ResourceIdentifier } from '../http/representation/ResourceIdentifier';
 import { NotImplementedHttpError } from '../util/errors/NotImplementedHttpError';
 import type { Conditions } from './Conditions';
-import type { ResourceStore } from './ResourceStore';
+import type { ResourceStore, ChangeMap } from './ResourceStore';
 
 /**
  * Base implementation of ResourceStore for implementers of custom stores.
  */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 export class BaseResourceStore implements ResourceStore {
-  public async resourceExists(identifier: ResourceIdentifier, conditions?: Conditions): Promise<boolean> {
+  public async hasResource(identifier: ResourceIdentifier): Promise<boolean> {
     throw new NotImplementedHttpError();
   }
 
@@ -21,22 +21,22 @@ export class BaseResourceStore implements ResourceStore {
   }
 
   public async setRepresentation(identifier: ResourceIdentifier, representation: Representation,
-    conditions?: Conditions): Promise<ResourceIdentifier[]> {
+    conditions?: Conditions): Promise<ChangeMap> {
     throw new NotImplementedHttpError();
   }
 
   public async addResource(container: ResourceIdentifier, representation: Representation,
-    conditions?: Conditions): Promise<ResourceIdentifier> {
+    conditions?: Conditions): Promise<ChangeMap> {
     throw new NotImplementedHttpError();
   }
 
   public async deleteResource(identifier: ResourceIdentifier,
-    conditions?: Conditions): Promise<ResourceIdentifier[]> {
+    conditions?: Conditions): Promise<ChangeMap> {
     throw new NotImplementedHttpError();
   }
 
   public async modifyResource(identifier: ResourceIdentifier, patch: Patch,
-    conditions?: Conditions): Promise<ResourceIdentifier[]> {
+    conditions?: Conditions): Promise<ChangeMap> {
     throw new NotImplementedHttpError();
   }
 }

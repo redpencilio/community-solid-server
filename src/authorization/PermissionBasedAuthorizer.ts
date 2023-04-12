@@ -1,10 +1,14 @@
 import type { CredentialSet } from '../authentication/Credentials';
+import type { ResourceIdentifier } from '../http/representation/ResourceIdentifier';
 import { getLoggerFor } from '../logging/LogUtil';
+import type { ResourceSet } from '../storage/ResourceSet';
 import { ForbiddenHttpError } from '../util/errors/ForbiddenHttpError';
+import { NotFoundHttpError } from '../util/errors/NotFoundHttpError';
 import { UnauthorizedHttpError } from '../util/errors/UnauthorizedHttpError';
 import type { AuthorizerInput } from './Authorizer';
 import { Authorizer } from './Authorizer';
-import type { AccessMode, PermissionSet } from './permissions/Permissions';
+import type { PermissionSet } from './permissions/Permissions';
+import { AccessMode } from './permissions/Permissions';
 
 /**
  * Authorizer that bases its decision on the output it gets from its PermissionReader.
@@ -15,16 +19,52 @@ import type { AccessMode, PermissionSet } from './permissions/Permissions';
 export class PermissionBasedAuthorizer extends Authorizer {
   protected readonly logger = getLoggerFor(this);
 
+  private readonly resourceSet: ResourceSet;
+
+  /**
+   * The existence of the target resource determines the output status code for certain situations.
+   * The provided {@link ResourceSet} will be used for that.
+   * @param resourceSet - {@link ResourceSet} that can verify the target resource existence.
+   */
+  public constructor(resourceSet: ResourceSet) {
+    super();
+    this.resourceSet = resourceSet;
+  }
+
   public async handle(input: AuthorizerInput): Promise<void> {
-    const { credentials, modes, identifier, permissionSet } = input;
+    const { credentials, requestedModes, availablePermissions } = input;
 
-    const modeString = [ ...modes ].join(',');
-    this.logger.debug(`Checking if ${credentials.agent?.webId} has ${modeString} permissions for ${identifier.path}`);
-
-    for (const mode of modes) {
-      this.requireModePermission(credentials, permissionSet, mode);
+    // Ensure all required modes are within the agent's permissions.
+    for (const [ identifier, modes ] of requestedModes.entrySets()) {
+      const modeString = [ ...modes ].join(',');
+      this.logger.debug(`Checking if ${credentials.agent?.webId} has ${modeString} permissions for ${identifier.path}`);
+      const permissions = availablePermissions.get(identifier) ?? {};
+      for (const mode of modes) {
+        try {
+          this.requireModePermission(credentials, permissions, mode);
+        } catch (error: unknown) {
+          await this.reportAccessError(identifier, modes, permissions, error);
+        }
+      }
+      this.logger.debug(`${JSON.stringify(credentials)} has ${modeString} permissions for ${identifier.path}`);
     }
-    this.logger.debug(`${JSON.stringify(credentials)} has ${modeString} permissions for ${identifier.path}`);
+  }
+
+  /**
+   * If we know the operation will return a 404 regardless (= resource does not exist and is not being created),
+   * and the agent is allowed to know about its existence (= the agent has Read permissions),
+   * then immediately send the 404 here, as it makes any other agent permissions irrelevant.
+   *
+   * Otherwise, deny access based on existing grounds.
+   */
+  private async reportAccessError(identifier: ResourceIdentifier, modes: ReadonlySet<AccessMode>,
+    permissions: PermissionSet, cause: unknown): Promise<never> {
+    const exposeExistence = this.hasModePermission(permissions, AccessMode.read);
+    if (exposeExistence && !modes.has(AccessMode.create) && !await this.resourceSet.hasResource(identifier)) {
+      throw new NotFoundHttpError();
+    }
+
+    throw cause;
   }
 
   /**

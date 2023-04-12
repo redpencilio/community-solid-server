@@ -5,10 +5,12 @@ import type {
   FileIdentifierMapperFactory,
   ResourceLink,
 } from '../../../../src/storage/mapping/FileIdentifierMapper';
+import type { ResourceStore } from '../../../../src/storage/ResourceStore';
 import { ensureTrailingSlash, trimTrailingSlashes } from '../../../../src/util/PathUtil';
-import { readableToString } from '../../../../src/util/StreamUtil';
+import { readableToQuads, readableToString } from '../../../../src/util/StreamUtil';
 import { HandlebarsTemplateEngine } from '../../../../src/util/templates/HandlebarsTemplateEngine';
-import { mockFs } from '../../../util/Util';
+import { SimpleSuffixStrategy } from '../../../util/SimpleSuffixStrategy';
+import { mockFileSystem } from '../../../util/Util';
 
 jest.mock('fs');
 
@@ -45,14 +47,27 @@ async function genToArray<T>(iterable: AsyncIterable<T>): Promise<T[]> {
 describe('A TemplatedResourcesGenerator', (): void => {
   const rootFilePath = '/templates/pod';
   // Using handlebars engine since it's smaller than any possible dummy
-  const generator = new TemplatedResourcesGenerator(rootFilePath, new DummyFactory(), new HandlebarsTemplateEngine());
+  const metadataStrategy = new SimpleSuffixStrategy('.meta');
+  let store: jest.Mocked<ResourceStore>;
+  let generator: TemplatedResourcesGenerator;
   let cache: { data: any };
   const template = '<{{webId}}> a <http://xmlns.com/foaf/0.1/Person>.';
   const location = { path: 'http://test.com/alice/' };
   const webId = 'http://alice/#profile';
 
   beforeEach(async(): Promise<void> => {
-    cache = mockFs(rootFilePath);
+    cache = mockFileSystem(rootFilePath);
+    store = {
+      hasResource: jest.fn(),
+    } as any;
+
+    generator = new TemplatedResourcesGenerator({
+      templateFolder: rootFilePath,
+      factory: new DummyFactory(),
+      templateEngine: new HandlebarsTemplateEngine('http://test.com/'),
+      metadataStrategy,
+      store,
+    });
   });
 
   it('fills in a template with the given options.', async(): Promise<void> => {
@@ -66,7 +81,7 @@ describe('A TemplatedResourcesGenerator', (): void => {
     expect(representation.binary).toBe(true);
     expect(representation.metadata.contentType).toBe('text/turtle');
     await expect(readableToString(representation.data)).resolves
-      .toEqual(`<${webId}> a <http://xmlns.com/foaf/0.1/Person>.`);
+      .toBe(`<${webId}> a <http://xmlns.com/foaf/0.1/Person>.`);
   });
 
   it('creates the necessary containers.', async(): Promise<void> => {
@@ -83,7 +98,7 @@ describe('A TemplatedResourcesGenerator', (): void => {
 
     const { representation } = result[3];
     await expect(readableToString(representation.data)).resolves
-      .toEqual(`<${webId}> a <http://xmlns.com/foaf/0.1/Person>.`);
+      .toBe(`<${webId}> a <http://xmlns.com/foaf/0.1/Person>.`);
   });
 
   it('copies the file stream directly if no template extension is found.', async(): Promise<void> => {
@@ -108,27 +123,50 @@ describe('A TemplatedResourcesGenerator', (): void => {
     const identifiers = result.map((res): ResourceIdentifier => res.identifier);
     expect(identifiers).toEqual([
       location,
+      { path: `${location.path}.meta` },
       { path: `${location.path}container/` },
       { path: `${location.path}container/template` },
+      { path: `${location.path}container/template.meta` },
     ]);
+
     // Root has the 1 raw metadata triple (with <> changed to its identifier) and content-type
     const rootMetadata = result[0].representation.metadata;
     expect(rootMetadata.identifier.value).toBe(location.path);
-    expect(rootMetadata.quads()).toHaveLength(2);
-    expect(rootMetadata.get('pre:has')?.value).toBe('metadata');
-    expect(rootMetadata.contentType).toBe('text/turtle');
+    expect(rootMetadata.contentType).toBeUndefined();
+    const rootMetadataQuads = await readableToQuads(result[1].representation.data);
+    const expRootMetadataQuads = rootMetadataQuads.getQuads(rootMetadata.identifier, 'pre:has', null, null);
+    expect(expRootMetadataQuads).toHaveLength(1);
+    expect(expRootMetadataQuads[0].object.value).toBe('metadata');
 
     // Container has no metadata triples besides content-type
-    const contMetadata = result[1].representation.metadata;
+    const contMetadata = result[2].representation.metadata;
     expect(contMetadata.identifier.value).toBe(`${location.path}container/`);
-    expect(contMetadata.quads()).toHaveLength(1);
-    expect(contMetadata.contentType).toBe('text/turtle');
+    expect(contMetadata.quads()).toHaveLength(0);
 
     // Document has the 1 raw metadata triple (with <> changed to its identifier) and content-type
-    const docMetadata = result[2].representation.metadata;
+    const docMetadata = result[3].representation.metadata;
     expect(docMetadata.identifier.value).toBe(`${location.path}container/template`);
-    expect(docMetadata.quads()).toHaveLength(2);
-    expect(docMetadata.get('pre:has')?.value).toBe('metadata');
     expect(docMetadata.contentType).toBe('text/turtle');
+    const docMetadataQuads = await readableToQuads(result[4].representation.data);
+    const expDocMetadataQuads = docMetadataQuads.getQuads(docMetadata.identifier, 'pre:has', null, null);
+    expect(expDocMetadataQuads).toHaveLength(1);
+    expect(expDocMetadataQuads[0].object.value).toBe('metadata');
+  });
+
+  it('does not create container when it already exists.', async(): Promise<void> => {
+    const meta = '<> <pre:has> "metadata".';
+    cache.data = { '.meta': meta };
+    store.hasResource = jest.fn().mockResolvedValue(true);
+
+    const result = await genToArray(generator.generate(location, { webId }));
+    const identifiers = result.map((res): ResourceIdentifier => res.identifier);
+    expect(identifiers).toEqual([
+      { path: `${location.path}.meta` },
+    ]);
+
+    const quads = await readableToQuads(result[0].representation.data);
+    const expQuads = quads.getQuads(`${location.path}`, 'pre:has', null, null);
+    expect(expQuads).toHaveLength(1);
+    expect(expQuads[0].object.value).toBe('metadata');
   });
 });

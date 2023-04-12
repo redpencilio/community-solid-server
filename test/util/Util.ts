@@ -1,26 +1,42 @@
 import type { Dirent, Stats } from 'fs';
 import { PassThrough, Readable } from 'stream';
 import type { SystemError } from '../../src/util/errors/SystemError';
+import Describe = jest.Describe;
 
 const portNames = [
   // Integration
   'Conditions',
+  'ContentNegotiation',
   'DynamicPods',
+  'ExpiringDataCleanup',
+  'FileBackend',
+  'GlobalQuota',
   'Identity',
   'LpdHandlerWithAuth',
   'LpdHandlerWithoutAuth',
   'Middleware',
+  'N3Patch',
+  'PermissionTable',
   'PodCreation',
-  'RedisResourceLocker',
+  'PodQuota',
+  'RedisLocker',
+  'ResourceLockCleanup',
   'RestrictedIdentity',
+  'SeedingPods',
   'ServerFetch',
   'SetupMemory',
   'SparqlStorage',
   'Subdomains',
   'WebSocketsProtocol',
+
   // Unit
   'BaseHttpServerFactory',
 ] as const;
+
+const socketNames = [
+  // Unit
+  'BaseHttpServerFactory',
+];
 
 export function getPort(name: typeof portNames[number]): number {
   const idx = portNames.indexOf(name);
@@ -31,11 +47,42 @@ export function getPort(name: typeof portNames[number]): number {
   return 6000 + idx;
 }
 
-export function describeIf(envFlag: string, name: string, fn: () => void): void {
+export function getSocket(name: typeof socketNames[number]): string {
+  const idx = socketNames.indexOf(name);
+  // Just in case something doesn't listen to the typings
+  if (idx < 0) {
+    throw new Error(`Unknown socket name ${name}`);
+  }
+  return `css${idx}.sock`;
+}
+
+export function describeIf(envFlag: string): Describe {
   const flag = `TEST_${envFlag.toUpperCase()}`;
   const enabled = !/^(|0|false)$/iu.test(process.env[flag] ?? '');
-  // eslint-disable-next-line jest/valid-describe, jest/valid-title, jest/no-disabled-tests
-  return enabled ? describe(name, fn) : describe.skip(name, fn);
+  return enabled ? describe : describe.skip;
+}
+
+/**
+ * This is needed when you want to wait for all promises to resolve.
+ * Also works when using jest.useFakeTimers().
+ * For more details see the links below
+ *  - https://github.com/facebook/jest/issues/2157
+ *  - https://stackoverflow.com/questions/52177631/jest-timer-and-promise-dont-work-well-settimeout-and-async-function
+ */
+export async function flushPromises(): Promise<void> {
+  return new Promise(jest.requireActual('timers').setImmediate);
+}
+
+/**
+ * Compares the contents of the given two maps.
+ */
+export function compareMaps<TKey, TVal>(map1: Map<TKey, TVal>, map2: Map<TKey, TVal>): void {
+  expect(new Set(map1.keys())).toEqual(new Set(map2.keys()));
+  // Looping like this also allows us to compare SetMultiMaps
+  for (const key of map1.keys()) {
+    // Adding key for better error output
+    expect({ key, value: map1.get(key) }).toEqual({ key, value: map2.get(key) });
+  }
 }
 
 /**
@@ -56,7 +103,7 @@ export function describeIf(envFlag: string, name: string, fn: () => void): void 
  * @param rootFilepath - The name of the root folder in which fs will start.
  * @param time - The date object to use for time functions (currently only mtime from lstats)
  */
-export function mockFs(rootFilepath?: string, time?: Date): { data: any } {
+export function mockFileSystem(rootFilepath?: string, time?: Date): { data: any } {
   const cache: { data: any } = { data: {}};
 
   rootFilepath = rootFilepath ?? 'folder';
@@ -93,7 +140,7 @@ export function mockFs(rootFilepath?: string, time?: Date): { data: any } {
     return { folder, name };
   }
 
-  const mock = {
+  const mockFs = {
     createReadStream(path: string): any {
       const { folder, name } = getFolder(path);
       return Readable.from([ folder[name] ]);
@@ -121,7 +168,7 @@ export function mockFs(rootFilepath?: string, time?: Date): { data: any } {
           isFile: (): boolean => typeof folder[name] === 'string',
           isDirectory: (): boolean => typeof folder[name] === 'object',
           isSymbolicLink: (): boolean => typeof folder[name] === 'symbol',
-          size: typeof folder[name] === 'string' ? folder[name].length : 0,
+          size: typeof folder[name] === 'string' ? folder[name].length : 4,
           mtime: time,
         } as Stats;
       },
@@ -145,7 +192,7 @@ export function mockFs(rootFilepath?: string, time?: Date): { data: any } {
         const entry = folder[name];
         return typeof entry === 'symbol' ? entry.description ?? 'invalid' : path;
       },
-      async rmdir(path: string): Promise<void> {
+      async rm(path: string): Promise<void> {
         const { folder, name } = getFolder(path);
         if (!folder[name]) {
           throwSystemError('ENOENT');
@@ -198,11 +245,97 @@ export function mockFs(rootFilepath?: string, time?: Date): { data: any } {
         const { folder, name } = getFolder(path);
         folder[name] = data;
       },
+      async rename(path: string, destination: string): Promise<void> {
+        const { folder, name } = getFolder(path);
+        if (!folder[name]) {
+          throwSystemError('ENOENT');
+        }
+        if (!(await this.lstat(path)).isFile()) {
+          throwSystemError('EISDIR');
+        }
+
+        const { folder: folderDest, name: nameDest } = getFolder(destination);
+        folderDest[nameDest] = folder[name];
+
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete folder[name];
+      },
+    },
+  };
+
+  const mockFsExtra = {
+    async readJson(path: string): Promise<NodeJS.Dict<unknown>> {
+      const { folder, name } = getFolder(path);
+      if (!folder[name]) {
+        throwSystemError('ENOENT');
+      }
+      return JSON.parse(folder[name]);
+    },
+    async writeJson(path: string, json: NodeJS.Dict<unknown>): Promise<void> {
+      const { folder, name } = getFolder(path);
+      const data = JSON.stringify(json, null, 2);
+      folder[name] = data;
+    },
+    async ensureDir(path: string): Promise<void> {
+      const { folder, name } = getFolder(path);
+      folder[name] = {};
+    },
+    async remove(path: string): Promise<void> {
+      const { folder, name } = getFolder(path);
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete folder[name];
+    },
+    createReadStream(path: string): any {
+      return mockFs.createReadStream(path);
+    },
+    createWriteStream(path: string): any {
+      return mockFs.createWriteStream(path);
+    },
+    async realpath(path: string): Promise<string> {
+      return await mockFs.promises.realpath(path);
+    },
+    async stat(path: string): Promise<Stats> {
+      return mockFs.promises.lstat(await mockFs.promises.realpath(path));
+    },
+    async lstat(path: string): Promise<Stats> {
+      return mockFs.promises.lstat(path);
+    },
+    async unlink(path: string): Promise<void> {
+      await mockFs.promises.unlink(path);
+    },
+    async symlink(target: string, path: string): Promise<void> {
+      await mockFs.promises.symlink(target, path);
+    },
+    async rm(path: string): Promise<void> {
+      await mockFs.promises.rm(path);
+    },
+    async readdir(path: string): Promise<string[]> {
+      return await mockFs.promises.readdir(path);
+    },
+    async* opendir(path: string): AsyncIterableIterator<Dirent> {
+      for await (const entry of mockFs.promises.opendir(path)) {
+        yield entry;
+      }
+    },
+    async mkdir(path: string): Promise<void> {
+      await mockFs.promises.mkdir(path);
+    },
+    async readFile(path: string): Promise<string> {
+      return await mockFs.promises.readFile(path);
+    },
+    async writeFile(path: string, data: string): Promise<void> {
+      await mockFs.promises.writeFile(path, data);
+    },
+    async rename(path: string, destination: string): Promise<void> {
+      await mockFs.promises.rename(path, destination);
     },
   };
 
   const fs = jest.requireMock('fs');
-  Object.assign(fs, mock);
+  Object.assign(fs, mockFs);
+
+  const fsExtra = jest.requireMock('fs-extra');
+  Object.assign(fsExtra, mockFsExtra);
 
   return cache;
 }

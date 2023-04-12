@@ -11,11 +11,13 @@ import { InternalServerError } from '../../src/util/errors/InternalServerError';
 import { SingleRootIdentifierStrategy } from '../../src/util/identifiers/SingleRootIdentifierStrategy';
 import { EqualReadWriteLocker } from '../../src/util/locking/EqualReadWriteLocker';
 import type { ExpiringReadWriteLocker } from '../../src/util/locking/ExpiringReadWriteLocker';
+import { MemoryResourceLocker } from '../../src/util/locking/MemoryResourceLocker';
 import type { ReadWriteLocker } from '../../src/util/locking/ReadWriteLocker';
-import { SingleThreadedResourceLocker } from '../../src/util/locking/SingleThreadedResourceLocker';
 import { WrappedExpiringReadWriteLocker } from '../../src/util/locking/WrappedExpiringReadWriteLocker';
 import { guardedStreamFrom } from '../../src/util/StreamUtil';
 import { PIM, RDF } from '../../src/util/Vocabularies';
+import { SimpleSuffixStrategy } from '../util/SimpleSuffixStrategy';
+import { flushPromises } from '../util/Util';
 jest.useFakeTimers('legacy');
 
 describe('A LockingResourceStore', (): void => {
@@ -31,6 +33,7 @@ describe('A LockingResourceStore', (): void => {
 
     // Not relevant for these tests
     const strategy = new RoutingAuxiliaryStrategy([]);
+    const metadataStrategy = new SimpleSuffixStrategy('.meta');
 
     const base = 'http://test.com/';
     path = `${base}path`;
@@ -39,14 +42,15 @@ describe('A LockingResourceStore', (): void => {
       new InMemoryDataAccessor(idStrategy),
       idStrategy,
       strategy,
+      metadataStrategy,
     );
 
     // Initialize store
     const metadata = new RepresentationMetadata({ path: base }, TEXT_TURTLE);
-    metadata.add(RDF.type, PIM.terms.Storage);
+    metadata.add(RDF.terms.type, PIM.terms.Storage);
     await source.setRepresentation({ path: base }, new BasicRepresentation([], metadata));
 
-    locker = new EqualReadWriteLocker(new SingleThreadedResourceLocker());
+    locker = new EqualReadWriteLocker(new MemoryResourceLocker());
     expiringLocker = new WrappedExpiringReadWriteLocker(locker, 1000);
 
     store = new LockingResourceStore(source, expiringLocker, strategy);
@@ -67,7 +71,7 @@ describe('A LockingResourceStore', (): void => {
 
     // Wait 1000ms and read
     jest.advanceTimersByTime(1000);
-    await new Promise(setImmediate);
+    await flushPromises();
     expect(representation.data.destroyed).toBe(true);
 
     // Verify a timeout error was thrown
@@ -95,7 +99,7 @@ describe('A LockingResourceStore', (): void => {
 
     // Wait 1000ms and watch the stream be destroyed
     jest.advanceTimersByTime(1000);
-    await new Promise(setImmediate);
+    await flushPromises();
     expect(representation.data.destroyed).toBe(true);
 
     // Verify a timeout error was thrown

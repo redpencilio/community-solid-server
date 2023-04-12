@@ -1,4 +1,10 @@
 #!/usr/bin/env node
-// eslint-disable-next-line @typescript-eslint/naming-convention
 const { AppRunner } = require('..');
-new AppRunner().runCli(process);
+
+// Attaching a logger to the uncaughtExceptionMonitor event,
+// such that the default uncaughtException behavior still occurs.
+process.on('uncaughtExceptionMonitor', (err, origin) => {
+  console.error(`Process is halting due to an ${origin} with error ${err.message}`);
+});
+
+new AppRunner().runCliSync(process);

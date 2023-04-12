@@ -58,20 +58,20 @@ export class AuthorizingHttpHandler extends OperationHttpHandler {
     this.operationHandler = args.operationHandler;
   }
 
-  public async handle(input: OperationHttpHandlerInput): Promise<ResponseDescription | undefined> {
+  public async handle(input: OperationHttpHandlerInput): Promise<ResponseDescription> {
     const { request, operation } = input;
     const credentials: CredentialSet = await this.credentialsExtractor.handleSafe(request);
     this.logger.verbose(`Extracted credentials: ${JSON.stringify(credentials)}`);
 
-    const modes = await this.modesExtractor.handleSafe(operation);
-    this.logger.verbose(`Required modes are read: ${[ ...modes ].join(',')}`);
+    const requestedModes = await this.modesExtractor.handleSafe(operation);
+    this.logger.verbose(`Retrieved required modes: ${[ ...requestedModes ].join(',')}`);
 
-    const permissionSet = await this.permissionReader.handleSafe({ credentials, identifier: operation.target });
-    this.logger.verbose(`Available permissions are ${JSON.stringify(permissionSet)}`);
+    const availablePermissions = await this.permissionReader.handleSafe({ credentials, requestedModes });
+    this.logger.verbose(`Available permissions are ${JSON.stringify(availablePermissions)}`);
 
     try {
-      await this.authorizer.handleSafe({ credentials, identifier: operation.target, modes, permissionSet });
-      operation.permissionSet = permissionSet;
+      await this.authorizer.handleSafe({ credentials, requestedModes, availablePermissions });
+      operation.availablePermissions = availablePermissions;
     } catch (error: unknown) {
       this.logger.verbose(`Authorization failed: ${(error as any).message}`);
       throw error;
